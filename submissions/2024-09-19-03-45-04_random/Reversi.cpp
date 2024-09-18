@@ -319,26 +319,26 @@ int main(int argc, char** argv) {
             return Input::load(seed);
         }
         return Input::load(std::cin);
-        }();
+    }();
 
-        const int N = input.N;
-        const int C = input.C;
-        NNArr<int> S = input.S;
-        const auto T = input.T;
+    const int N = input.N;
+    const int C = input.C;
+    NNArr<int> S = input.S;
+    const auto T = input.T;
 
-        std::vector<std::tuple<int, int, int>> moves;
+    std::vector<std::tuple<int, int, int>> moves;
 
-        Xorshift rnd;
-        while (true) {
-            auto [y, x, c] = place_random(N, C, S, rnd);
-            if (y == -1) break;
-            moves.emplace_back(y, x, c);
-        }
+    Xorshift rnd;
+    while (true) {
+        auto [y, x, c] = place_random(N, C, S, rnd);
+        if (y == -1) break;
+        moves.emplace_back(y, x, c);
+    }
 
-        std::cout << moves.size() << '\n';
-        for (const auto& [y, x, c] : moves) {
-            std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
-        }
+    std::cout << moves.size() << '\n';
+    for (const auto& [y, x, c] : moves) {
+        std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
+    }
 
-        return 0;
+    return 0;
 }
