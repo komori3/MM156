@@ -1,0 +1,8 @@
+.vs
+tester
+vs/*/obj
+vs/*/bin
+sample
+submissions/*/err
+submissions/*/out
+submissions/*/execution_log.txt
