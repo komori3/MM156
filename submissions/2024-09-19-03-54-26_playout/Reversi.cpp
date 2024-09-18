@@ -348,27 +348,27 @@ int main(int argc, char** argv) {
             return Input::load(seed);
         }
         return Input::load(std::cin);
-        }();
+    }();
 
-        Xorshift rnd;
-        int best_score = -1;
-        std::vector<std::tuple<int, int, int>> best_moves;
+    Xorshift rnd;
+    int best_score = -1;
+    std::vector<std::tuple<int, int, int>> best_moves;
 
-        int loop = 0;
-        while (timer.elapsed_ms() < 9000) {
-            auto [score, moves] = random_playout(input, rnd);
-            if (chmax(best_score, score)) {
-                best_moves = moves;
-                dump(loop, best_score);
-            }
-            loop++;
+    int loop = 0;
+    while (timer.elapsed_ms() < 9000) {
+        auto [score, moves] = random_playout(input, rnd);
+        if (chmax(best_score, score)) {
+            best_moves = moves;
+            dump(loop, best_score);
         }
+        loop++;
+    }
 
-        const auto& moves(best_moves);
-        std::cout << moves.size() << '\n';
-        for (const auto& [y, x, c] : moves) {
-            std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
-        }
+    const auto& moves(best_moves);
+    std::cout << moves.size() << '\n';
+    for (const auto& [y, x, c] : moves) {
+        std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
+    }
 
-        return 0;
+    return 0;
 }
