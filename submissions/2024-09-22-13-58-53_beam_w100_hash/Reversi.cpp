@@ -472,7 +472,6 @@ namespace NInput {
     NNArr<int> S;
     NNArr<int> T; // NOTE: 空きマスは -1
     std::array<int, 8> NT;
-    int num_empty;
 
     void load(std::istream& in) {
         in >> N >> C;
@@ -482,11 +481,9 @@ namespace NInput {
             T[y].fill(WALL);
         }
         NT.fill(0);
-        num_empty = 0;
         for (int y = 1; y <= N; y++) {
             for (int x = 1; x <= N; x++) {
                 in >> S[y][x];
-                num_empty += S[y][x] == 0;
             }
         }
         for (int y = 1; y <= N; y++) {
@@ -720,11 +717,6 @@ struct Node {
     void advance(const Operation& op) {
         state.apply_move(op);
     }
-
-    bool operator<(const Node& rhs) const {
-        int s1 = state.calc_score(), s2 = rhs.state.calc_score();
-        return s1 == s2 ? state.hash > rhs.state.hash : s1 > s2;
-    }
 };
 
 struct TemporaryNode {
@@ -746,7 +738,8 @@ Node beam_search(const State& initial_state, const int beam_width) {
 
     std::vector<TemporaryNode> temp_nodes;
     HashSet<uint64_t> seen;
-    
+    //std::unordered_set<uint64_t> seen;
+
     int best_score = initial_state.calc_score();
     Node best_node = nodes.back();
 
@@ -806,80 +799,6 @@ Node beam_search(const State& initial_state, const int beam_width) {
     return best_node;
 }
 
-Node chokudai_search(const State& initial_state, const int beam_width, double duration) {
-    using namespace NInput;
-
-    Timer timer;
-
-    std::vector<std::set<Node>> turn_to_nodes(num_empty + 1);
-    std::vector<HashSet<uint64_t>> turn_to_hashes(num_empty + 1);
-    int best_score;
-    Node best_node;
-    {
-        Node initial_node(initial_state);
-        initial_node.move_history = Stack{ nullptr };
-        turn_to_nodes[0].insert(initial_node);
-        turn_to_hashes[0].insert(initial_node.state.hash);
-        best_score = initial_state.calc_score();
-        best_node = initial_node;
-    }
-
-    std::vector<TemporaryNode> temp_nodes;
-
-    int next_dump_time = 100, dump_interval = 100;
-    while (true) {
-        for (int turn = 0; turn < num_empty; turn++) {
-            auto elapsed = timer.elapsed_ms();
-            if (elapsed > next_dump_time) {
-                dump(elapsed, best_score);
-                next_dump_time += dump_interval;
-            }
-            if (elapsed > duration) {
-                return best_node;
-            }
-            auto& nodes = turn_to_nodes[turn];
-            auto& next_nodes = turn_to_nodes[turn + 1];
-            auto& next_hashes = turn_to_hashes[turn + 1];
-            auto thresh = next_nodes.empty() ? -1 : next_nodes.rbegin()->state.calc_score();
-            if (nodes.empty()) continue;
-            auto node = *nodes.begin();
-            nodes.erase(nodes.begin());
-            const auto& state = node.state;
-            for (int y = 1; y <= N; y++) {
-                for (int x = 1; x <= N; x++) {
-                    auto b64 = state.check_placeability(y, x);
-                    if (!b64) continue;
-                    for (int c = 1; c <= C; c++) {
-                        if ((b64 >> (c << 3)) & 0xFF) {
-                            Operation op{ b64, y, x, c };
-                            auto [nscore, nhash] = state.try_move(op);
-                            if (nscore < thresh) continue;
-                            if (next_hashes.count(nhash)) continue;
-                            auto next_node(node);
-                            next_node.advance(op);
-                            next_node.move_history = node.move_history.push(op);
-                            next_nodes.insert(next_node);
-                            next_hashes.insert(nhash);
-                            if (chmax(best_score, nscore)) {
-                                best_node = next_node;
-                            }
-                            //if (seen.count(nhash)) continue;
-                            //temp_nodes.emplace_back(nscore, node_index, op);
-                            //seen.insert(nhash);
-                        }
-                    }
-                }
-            }
-            while (next_nodes.size() > beam_width) {
-                next_nodes.erase(std::prev(next_nodes.end()));
-            }
-        }
-    }
-
-    return best_node;
-}
-
-
 
 int main(int argc, char** argv) {
 
@@ -904,7 +823,7 @@ int main(int argc, char** argv) {
     // 両端が k 以外のトークン：
 
     const bool LOCAL_MODE = argc > 1 && std::string(argv[1]) == "local";
-    const int seed = 2;
+    const int seed = 5;
 
     if (LOCAL_MODE) {
         NInput::load(seed);
@@ -918,10 +837,7 @@ int main(int argc, char** argv) {
     {
         State state;
         state.initialize();
-
-        auto result = chokudai_search(state, 20, 9000);
-
-        //auto result = beam_search(state, 10);
+        auto result = beam_search(state, 100);
 
         std::vector<Operation> moves;
         Stack move_history = result.move_history;
