@@ -473,6 +473,7 @@ namespace NInput {
     NNArr<int> T; // NOTE: 空きマスは -1
     std::array<int, 8> NT;
     int num_empty;
+    int perfect_score;
 
     void load(std::istream& in) {
         in >> N >> C;
@@ -483,18 +484,23 @@ namespace NInput {
         }
         NT.fill(0);
         num_empty = 0;
+        perfect_score = 0;
         for (int y = 1; y <= N; y++) {
             for (int x = 1; x <= N; x++) {
                 in >> S[y][x];
                 num_empty += S[y][x] == 0;
             }
         }
+        int ntarget = 0;
         for (int y = 1; y <= N; y++) {
             for (int x = 1; x <= N; x++) {
                 in >> T[y][x];
                 if (T[y][x] >= 0) NT[T[y][x]]++;
+                ntarget += T[y][x] > 0;
             }
         }
+        perfect_score = ntarget + ntarget * ntarget;
+        dump(perfect_score);
     }
 
     void load(const int seed) {
@@ -521,11 +527,11 @@ namespace NHash {
 
 }
 
-struct Move {
+struct Flip {
     // yyyyyxxxxxpppnnn : 16bit
     uint16_t data;
-    Move() = default;
-    Move(int y, int x, int pc, int nc) { set(y, x, pc, nc); }
+    Flip() = default;
+    Flip(int y, int x, int pc, int nc) { set(y, x, pc, nc); }
     inline void set(int y, int x, int pc, int nc) {
         data = (uint16_t(y) << 11) | (uint16_t(x) << 6) | (uint16_t(pc) << 3) | uint16_t(nc);
     }
@@ -536,6 +542,14 @@ struct Move {
         int y = data >> 11;
         return { y, x, pc, nc };
     }
+};
+
+struct Flips {
+    static constexpr size_t MAX_FLIPS = 128;
+    std::array<Flip, MAX_FLIPS> data;
+    size_t sz = 0;
+    inline void set(int y, int x, int pc, int nc) { data[sz++].set(y, x, pc, nc); }
+    inline void reset() { sz = 0; }
 };
 
 struct Board {
@@ -660,6 +674,49 @@ struct State {
         return { nplaced + nmatched * nmatched, nhash };
     }
 
+    void change2(Flips& f, int y, int x, int nc) {
+        using namespace NInput;
+        int pc = S.get(y, x);
+        placed += int(pc == 0);
+        matched += T[y][x] ? (int(nc == T[y][x]) - int(pc == T[y][x])) : 0;
+        S.set(y, x, nc);
+        hash ^= NHash::table[y][x][pc] ^ NHash::table[y][x][nc];
+        f.set(y, x, pc, nc);
+    }
+
+    void undo(const Flips& fs) {
+        using namespace NInput;
+        for (int i = 0; i < (int)fs.sz; i++) {
+            const auto& f = fs.data[i];
+            auto [y, x, pc, nc] = f.to_tuple();
+            placed -= int(pc == 0);
+            matched -= T[y][x] ? (int(nc == T[y][x]) - int(pc == T[y][x])) : 0;
+            S.set(y, x, pc);
+            hash ^= NHash::table[y][x][pc] ^ NHash::table[y][x][nc];
+        }
+    }
+
+    std::pair<int, uint64_t> try_move2(const Operation& op) {
+        using namespace NInput;
+        Flips flips;
+        const auto& [b64, y, x, c] = op;
+        assert(!S.get(y, x));
+        change2(flips, y, x, c);
+        int b8 = (b64 >> (c * 8)) & 0xFF;
+        for (int d = 0; d < 8; d++) if (b8 >> d & 1) {
+            int ny = y + dy[d], nx = x + dx[d];
+            while (S.get(ny, nx) != c) {
+                change2(flips, ny, nx, c);
+                ny += dy[d];
+                nx += dx[d];
+            }
+        }
+        auto nscore = calc_score();
+        auto nhash = hash;
+        undo(flips);
+        return { nscore, nhash };
+    }
+
     void change(int y, int x, int nc) {
         using namespace NInput;
         int pc = S.get(y, x);
@@ -716,7 +773,7 @@ struct Node {
     Node() = default;
     Node(const State& state_) : state(state_) {}
     inline int get_score() { return state.calc_score(); }
-    inline std::pair<int, uint64_t> calculate(const Operation& op) const { return state.try_move(op); }
+    inline std::pair<int, uint64_t> calculate(const Operation& op) { return state.try_move2(op); }
     void advance(const Operation& op) {
         state.apply_move(op);
     }
@@ -755,7 +812,7 @@ Node beam_search(const State& initial_state, const int beam_width) {
         seen.clear();
 
         for (int node_index = 0; node_index < (int)nodes.size(); node_index++) {
-            const auto& state = nodes[node_index].state;
+            auto& state = nodes[node_index].state;
             for (int y = 1; y <= N; y++) {
                 for (int x = 1; x <= N; x++) {
                     auto b64 = state.check_placeability(y, x);
@@ -763,7 +820,7 @@ Node beam_search(const State& initial_state, const int beam_width) {
                     for (int c = 1; c <= C; c++) {
                         if ((b64 >> (c << 3)) & 0xFF) {
                             Operation op{ b64, y, x, c };
-                            auto [nscore, nhash] = state.try_move(op);
+                            auto [nscore, nhash] = state.try_move2(op);
                             if (seen.count(nhash)) continue;
                             temp_nodes.emplace_back(nscore, node_index, op);
                             seen.insert(nhash);
@@ -844,7 +901,7 @@ Node chokudai_search(const State& initial_state, const int beam_width, double du
             if (nodes.empty()) continue;
             auto node = *nodes.begin();
             nodes.erase(nodes.begin());
-            const auto& state = node.state;
+            auto& state = node.state;
             for (int y = 1; y <= N; y++) {
                 for (int x = 1; x <= N; x++) {
                     auto b64 = state.check_placeability(y, x);
@@ -852,7 +909,7 @@ Node chokudai_search(const State& initial_state, const int beam_width, double du
                     for (int c = 1; c <= C; c++) {
                         if ((b64 >> (c << 3)) & 0xFF) {
                             Operation op{ b64, y, x, c };
-                            auto [nscore, nhash] = state.try_move(op);
+                            auto [nscore, nhash] = state.try_move2(op);
                             if (nscore < thresh) continue;
                             if (next_hashes.count(nhash)) continue;
                             auto next_node(node);
@@ -901,7 +958,7 @@ int main(int argc, char** argv) {
     // x にいくつ種類 k のトークンが隣接しても一つとみなしてよいので、両端は種類 k のトークンでもないとする
     // 両端が空白：両端に種類 k 以外のトークンを配置すれば裏返るので、unstable
     // 一方が空白で他方がトークン k'!=k：空白に k' を配置すれば裏返るので、unstable
-    // 両端が k 以外のトークン：
+    // 両端が k 以外のトークン：ややこしいので、列の全てが埋まっている場合のみ stable とする
 
     const bool LOCAL_MODE = argc > 1 && std::string(argv[1]) == "local";
     const int seed = 2;
