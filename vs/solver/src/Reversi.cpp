@@ -225,10 +225,7 @@ struct State {
 
     static constexpr int BUFSIZE = 131072;
 
-    int N;
-    int C;
     NNArr<int> S;
-    NNArr<int> T;
 
     int placed;
     int matched;
@@ -241,10 +238,7 @@ struct State {
     State() { initialize(); }
 
     void initialize() {
-        N = NInput::N;
-        C = NInput::C;
         S = NInput::S;
-        T = NInput::T;
         placed = 0;
         matched = compute_matched();
         pointer = 0;
@@ -255,6 +249,7 @@ struct State {
     }
 
     inline int compute_matched() const {
+        using namespace NInput;
         int m = 0;
         for (int y = 1; y <= N; y++) {
             for (int x = 1; x <= N; x++) {
@@ -286,11 +281,13 @@ struct State {
     }
 
     void dry_change(int& p, int& m, int y, int x, int c) const {
+        using namespace NInput;
         p += int(S[y][x] == 0);
         m += T[y][x] ? (int(c == T[y][x]) - int(S[y][x] == T[y][x])) : 0;
     }
 
     int calc_diff(uint64_t b64, int y, int x, int c) const {
+        using namespace NInput;
         assert(!S[y][x]);
         int nplaced = placed, nmatched = matched;
         dry_change(nplaced, nmatched, y, x, c);
@@ -307,6 +304,7 @@ struct State {
     }
 
     void change(int y, int x, int c) {
+        using namespace NInput;
         placed += int(S[y][x] == 0);
         matched += T[y][x] ? (int(c == T[y][x]) - int(S[y][x] == T[y][x])) : 0;
         move_stack[pointer++].set(y, x, S[y][x], c);
@@ -328,6 +326,7 @@ struct State {
     }
 
     bool place_greedy() {
+        using namespace NInput;
         int max_diff = INT_MIN, max_y, max_x, max_c;
         uint64_t max_b64;
         for (int y = 1; y <= N; y++) {
@@ -364,6 +363,7 @@ struct State {
     }
 
     inline bool undo_single() {
+        using namespace NInput;
         pointer--;
         auto [y, x, pc, nc] = move_stack[pointer].to_tuple();
         placed -= int(pc == 0);
