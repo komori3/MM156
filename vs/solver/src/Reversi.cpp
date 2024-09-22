@@ -205,17 +205,19 @@ namespace NInput {
 }
 
 struct Move {
-    union {
-        int8_t i8[4];
-        int32_t i32;
-    } u;
+    // yyyyyxxxxxpppnnn : 16bit
+    uint16_t data;
+    Move() = default;
     Move(int y, int x, int pc, int nc) { set(y, x, pc, nc); }
-    Move(int i32 = 0) { u.i32 = i32; }
     inline void set(int y, int x, int pc, int nc) {
-        u.i8[0] = y; u.i8[1] = x; u.i8[2] = pc; u.i8[3] = nc;
+        data = (uint16_t(y) << 11) | (uint16_t(x) << 6) | (uint16_t(pc) << 3) | uint16_t(nc);
     }
     std::tuple<int, int, int, int> to_tuple() const {
-        return { u.i8[0], u.i8[1], u.i8[2], u.i8[3] };
+        int nc = data & 0b111; nc = (nc == 7) ? -1 : nc;
+        int pc = (data >> 3) & 0b111; pc = (pc == 7) ? -1 : pc;
+        int x = (data >> 6) & 0b11111;
+        int y = data >> 11;
+        return { y, x, pc, nc };
     }
 };
 
