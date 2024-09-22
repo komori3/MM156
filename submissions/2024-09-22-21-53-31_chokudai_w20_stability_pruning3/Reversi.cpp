@@ -592,7 +592,6 @@ struct State {
     Board S;
     short placed;
     short matched;
-    short stabled;
     uint64_t hash;
 
     void initialize() {
@@ -608,8 +607,6 @@ struct State {
         }
         placed = 0;
         matched = compute_matched();
-        stabled = compute_stabled();
-        dump(placed, matched, stabled);
     }
 
     inline int compute_matched() const {
@@ -624,25 +621,7 @@ struct State {
         return m;
     }
 
-    inline int compute_stabled() const {
-        using namespace NInput;
-        int m = 0;
-        for (int y = 1; y <= N; y++) {
-            for (int x = 1; x <= N; x++) {
-                if (S.get(y, x) <= 0) continue;
-                m += is_stable(y, x);
-            }
-        }
-        return m;
-    }
-
     inline int calc_score() const {
-        //return placed + (int)matched * matched;
-        int unstabled = matched - stabled;
-        return placed + (int)stabled * stabled + (int)unstabled * unstabled / 10;
-    }
-
-    inline int calc_raw_score() const {
         return placed + (int)matched * matched;
     }
 
@@ -787,36 +766,26 @@ struct State {
         return { nscore, nhash };
     }
 
-    void change(Flips& f, int y, int x, int nc) {
+    void change(int y, int x, int nc) {
         using namespace NInput;
         int pc = S.get(y, x);
         placed += int(pc == 0);
         matched += T[y][x] ? (int(nc == T[y][x]) - int(pc == T[y][x])) : 0;
         S.set(y, x, nc);
         hash ^= NHash::table[y][x][pc] ^ NHash::table[y][x][nc];
-        f.set(y, x, pc, nc);
     }
 
     void apply_move(const Operation& op) {
-        static Flips flips;
         const auto& [b64, y, x, c] = op;
         assert(!S.get(y, x));
-        flips.reset();
-        change(flips, y, x, c);
+        change(y, x, c);
         int b8 = (b64 >> (c * 8)) & 0xFF;
         for (int d = 0; d < 8; d++) if (b8 >> d & 1) {
             int ny = y + dy[d], nx = x + dx[d];
             while (S.get(ny, nx) != c) {
-                change(flips, ny, nx, c);
+                change(ny, nx, c);
                 ny += dy[d];
                 nx += dx[d];
-            }
-        }
-        for (int i = 0; i < (int)flips.sz; i++) {
-            auto [ny, nx, pc, nc] = flips.data[i].to_tuple();
-            if (is_stable(ny, nx)) {
-                assert(nc == NInput::T[y][x]);
-                stabled++;
             }
         }
     }
@@ -969,7 +938,7 @@ Node chokudai_search(const State& initial_state, const int beam_width, double du
         for (int turn = 0; turn < num_empty; turn++) {
             auto elapsed = timer.elapsed_ms();
             if (elapsed > next_dump_time) {
-                dump(elapsed, best_score, best_node.state.calc_raw_score());
+                dump(elapsed, best_score);
                 next_dump_time += dump_interval;
             }
             if (elapsed > duration) {
@@ -1042,7 +1011,7 @@ int main(int argc, char** argv) {
     // 両端が k 以外のトークン：ややこしいので、列の全てが埋まっている場合のみ stable とする
 
     const bool LOCAL_MODE = argc > 1 && std::string(argv[1]) == "local";
-    const int seed = 1;
+    const int seed = 2;
 
     if (LOCAL_MODE) {
         NInput::load(seed);
