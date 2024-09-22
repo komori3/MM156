@@ -171,6 +171,8 @@ constexpr int EMPTY = 0;
 template<typename T> using NArr = std::array<T, NMAX>;
 template<typename T> using NNArr = std::array<NArr<T>, NMAX>;
 
+
+
 struct Input {
 
     const int N;
@@ -248,8 +250,6 @@ struct State {
     int pointer;
     std::array<Move, BUFSIZE> move_stack;
 
-    int best_score = 0;
-
     State(const Input& input) :
         N(input.N),
         C(input.C),
@@ -268,7 +268,7 @@ struct State {
         int m = 0;
         for (int y = 1; y <= N; y++) {
             for (int x = 1; x <= N; x++) {
-                if (T[y][x] <= 0) continue;
+                if (S[y][x] <= 0) continue;
                 m += S[y][x] == T[y][x];
             }
         }
@@ -297,7 +297,7 @@ struct State {
 
     void dry_change(int& p, int& m, int y, int x, int c) const {
         p += int(S[y][x] == 0);
-        m += T[y][x] ? (int(c == T[y][x]) - int(S[y][x] == T[y][x])) : 0;
+        m += int(c == T[y][x]) - (T[y][x] ? int(S[y][x] == T[y][x]) : 0);
     }
 
     int calc_diff(uint64_t b64, int y, int x, int c) const {
@@ -318,7 +318,7 @@ struct State {
 
     void change(int y, int x, int c) {
         placed += int(S[y][x] == 0);
-        matched += T[y][x] ? (int(c == T[y][x]) - int(S[y][x] == T[y][x])) : 0;
+        matched += int(c == T[y][x]) - (T[y][x] ? int(S[y][x] == T[y][x]) : 0);
         move_stack[pointer++].set(y, x, S[y][x], c);
         S[y][x] = c;
     }
@@ -373,37 +373,16 @@ struct State {
         return moves;
     }
 
-    inline bool undo_single() {
-        pointer--;
-        auto [y, x, pc, nc] = move_stack[pointer].to_tuple();
-        placed -= int(pc == 0);
-        matched -= T[y][x] ? (int(nc == T[y][x]) - int(pc == T[y][x])) : 0;
-        S[y][x] = pc;
-        return pc == 0; // pc==0: placing / pc!=0: reversing
-    }
-
-    inline void undo() {
-        while (!undo_single());
-    }
-
-    inline void undo(int p) {
-        while (pointer != p) { undo(); }
-    }
-
     void run() {
-        int best_score = 0;
-        int best_pointer = -1;
         while (place_greedy()) {
             //dump(placed, pointer, placed, matched, eval());
-            if (chmax(best_score, eval())) {
-                best_pointer = pointer;
-                dump(best_pointer, best_score);
-            }
         }
-        undo(best_pointer);
+        std::cerr << eval() << '\n';
     }
 
 };
+
+
 
 int main(int argc, char** argv) {
 
@@ -412,20 +391,6 @@ int main(int argc, char** argv) {
 #ifdef HAVE_OPENCV_HIGHGUI
     cv::utils::logging::setLogLevel(cv::utils::logging::LogLevel::LOG_LEVEL_SILENT);
 #endif
-
-    // 通常オセロの四隅のように、一度置いたら二度と裏返せない"急所"が存在する
-    // 盤面がプレイアウトで生成されることから、急所に異なる色が配置されるようなケースは枝刈りしてよい
-    // 盤面の評価も、急所のみで行ったり急所の評価を重めにする等したほうがよい
-
-    // 一次元オセロで位置 x にある種類 k のトークンを裏返せるか？
-    // セルには 空白セル・壁セル・種類 k のトークン・種類 k 以外のトークン がある
-
-    // 両端の少なくとも一方が壁セル：stable
-    // 両端は壁セルではないとする
-    // x にいくつ種類 k のトークンが隣接しても一つとみなしてよいので、両端は種類 k のトークンでもないとする
-    // 両端が空白：両端に種類 k 以外のトークンを配置すれば裏返るので、unstable
-    // 一方が空白で他方がトークン k'!=k：空白に k' を配置すれば裏返るので、unstable
-    // 両端が k 以外のトークン：
 
     const bool LOCAL_MODE = argc > 1 && std::string(argv[1]) == "local";
     const int seed = 2;

@@ -171,6 +171,8 @@ constexpr int EMPTY = 0;
 template<typename T> using NArr = std::array<T, NMAX>;
 template<typename T> using NNArr = std::array<NArr<T>, NMAX>;
 
+
+
 struct Input {
 
     const int N;
@@ -247,8 +249,6 @@ struct State {
 
     int pointer;
     std::array<Move, BUFSIZE> move_stack;
-
-    int best_score = 0;
 
     State(const Input& input) :
         N(input.N),
@@ -405,6 +405,8 @@ struct State {
 
 };
 
+
+
 int main(int argc, char** argv) {
 
     Timer timer;
@@ -412,20 +414,6 @@ int main(int argc, char** argv) {
 #ifdef HAVE_OPENCV_HIGHGUI
     cv::utils::logging::setLogLevel(cv::utils::logging::LogLevel::LOG_LEVEL_SILENT);
 #endif
-
-    // 通常オセロの四隅のように、一度置いたら二度と裏返せない"急所"が存在する
-    // 盤面がプレイアウトで生成されることから、急所に異なる色が配置されるようなケースは枝刈りしてよい
-    // 盤面の評価も、急所のみで行ったり急所の評価を重めにする等したほうがよい
-
-    // 一次元オセロで位置 x にある種類 k のトークンを裏返せるか？
-    // セルには 空白セル・壁セル・種類 k のトークン・種類 k 以外のトークン がある
-
-    // 両端の少なくとも一方が壁セル：stable
-    // 両端は壁セルではないとする
-    // x にいくつ種類 k のトークンが隣接しても一つとみなしてよいので、両端は種類 k のトークンでもないとする
-    // 両端が空白：両端に種類 k 以外のトークンを配置すれば裏返るので、unstable
-    // 一方が空白で他方がトークン k'!=k：空白に k' を配置すれば裏返るので、unstable
-    // 両端が k 以外のトークン：
 
     const bool LOCAL_MODE = argc > 1 && std::string(argv[1]) == "local";
     const int seed = 2;
