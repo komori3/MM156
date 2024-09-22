@@ -171,29 +171,16 @@ constexpr int EMPTY = 0;
 template<typename T> using NArr = std::array<T, NMAX>;
 template<typename T> using NNArr = std::array<NArr<T>, NMAX>;
 
-struct Input {
+namespace NInput {
 
-    const int N;
-    const int C;
-    const NNArr<int> S;
-    const NNArr<int> T;
+    int N;
+    int C;
+    NNArr<int> S;
+    NNArr<int> T;
 
-private:
-
-    Input(
-        const int N_,
-        const int C_,
-        const NNArr<int>& S_,
-        const NNArr<int>& T_
-    ) : N(N_), C(C_), S(S_), T(T_) {}
-
-public:
-
-    static Input load(std::istream& in) {
-        int N, C;
+    void load(std::istream& in) {
         in >> N >> C;
         assert(8 <= N && N <= 30);
-        NNArr<int> S, T;
         for (int y = 0; y < NMAX; y++) {
             S[y].fill(WALL);
             T[y].fill(WALL);
@@ -208,15 +195,14 @@ public:
                 in >> T[y][x];
             }
         }
-        return Input(N, C, S, T);
     }
 
-    static Input load(const int seed) {
+    void load(const int seed) {
         std::ifstream ifs(format("../../tester/in/%d.in", seed));
-        return load(ifs);
+        load(ifs);
     }
 
-};
+}
 
 struct Move {
     union {
@@ -250,15 +236,17 @@ struct State {
 
     int best_score = 0;
 
-    State(const Input& input) :
-        N(input.N),
-        C(input.C),
-        S(input.S),
-        T(input.T),
-        placed(0),
-        matched(compute_matched()),
-        pointer(0)
-    {}
+    State() { initialize(); }
+
+    void initialize() {
+        N = NInput::N;
+        C = NInput::C;
+        S = NInput::S;
+        T = NInput::T;
+        placed = 0;
+        matched = compute_matched();
+        pointer = 0;
+    }
 
     inline int eval() const {
         return placed + matched * matched;
@@ -430,14 +418,14 @@ int main(int argc, char** argv) {
     const bool LOCAL_MODE = argc > 1 && std::string(argv[1]) == "local";
     const int seed = 2;
 
-    const auto input = [&]() {
-        if (LOCAL_MODE) {
-            return Input::load(seed);
-        }
-        return Input::load(std::cin);
-    }();
+    if (LOCAL_MODE) {
+        NInput::load(seed);
+    }
+    else {
+        NInput::load(std::cin);
+    }
 
-    State state(input);
+    State state;
     state.run();
 
     auto moves = state.to_moves();
