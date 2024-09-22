@@ -251,6 +251,172 @@ struct Board {
 
 };
 
+namespace NBeam {
+
+    struct Operation {
+        uint64_t b64; // placeability
+        int y, x, c;
+    };
+
+    struct Flips {
+
+        static constexpr size_t NMAX_FLIPS = 128; // 30x30 の盤面なら最大 107 個裏返るはず
+
+        std::array<Move, NMAX_FLIPS> flips;
+        int nflips;
+
+        inline void reset() { nflips = 0; }
+        inline void set(int y, int x, int pc, int nc) {
+            flips[nflips++].set(y, x, pc, nc);
+        }
+
+    };
+
+    struct State {
+
+        Board S;
+        short placed;
+        short matched;
+
+        void initialize() {
+            S.initialize(NInput::S);
+            placed = 0;
+            matched = compute_matched();
+        }
+
+        inline int compute_matched() const {
+            using namespace NInput;
+            int m = 0;
+            for (int y = 1; y <= N; y++) {
+                for (int x = 1; x <= N; x++) {
+                    if (T[y][x] <= 0) continue;
+                    m += S.get(y, x) == T[y][x];
+                }
+            }
+            return m;
+        }
+
+        inline int calc_score() const {
+            return placed + (int)matched * matched;
+        }
+
+        // c*8+d bit 目が立っている -> c を置くことで方向 d を裏返せる
+        uint64_t check_placeability(int y, int x) const {
+            uint64_t b64 = 0;
+            if (S.get(y, x)) return b64;
+            for (int d = 0; d < 8; d++) {
+                int ny = y + dy[d], nx = x + dx[d];
+                if (S.get(ny, nx) <= 0) continue;
+                int c = S.get(ny, nx); // c 以外は置ける可能性がある
+                while (true) {
+                    ny += dy[d];
+                    nx += dx[d];
+                    if (S.get(ny, nx) <= 0) break;
+                    if (S.get(ny, nx) != c) {
+                        b64 |= 1ULL << (S.get(ny, nx) * 8 + d); // 色 b[ny][nx] は b[y][x] に置くことができる
+                    }
+                }
+            }
+            return b64;
+        }
+
+        void try_change(int& p, int& m, int y, int x, int c) const {
+            using namespace NInput;
+            p += int(S.get(y, x) == 0);
+            m += T[y][x] ? (int(c == T[y][x]) - int(S.get(y, x) == T[y][x])) : 0;
+        }
+
+        int try_move(const Operation& op) const {
+            using namespace NInput;
+            const auto& [b64, y, x, c] = op;
+            assert(!S.get(y, x));
+            int nplaced = placed, nmatched = matched;
+            try_change(nplaced, nmatched, y, x, c);
+            int b8 = (b64 >> (c * 8)) & 0xFF;
+            for (int d = 0; d < 8; d++) if (b8 >> d & 1) {
+                int ny = y + dy[d], nx = x + dx[d];
+                while (S.get(ny, nx) != c) {
+                    try_change(nplaced, nmatched, ny, nx, c);
+                    ny += dy[d];
+                    nx += dx[d];
+                }
+            }
+            return nplaced + nmatched * nmatched;
+        }
+
+        void change(int y, int x, int c, Flips& flips) {
+            using namespace NInput;
+            placed += int(S.get(y, x) == 0);
+            matched += T[y][x] ? (int(c == T[y][x]) - int(S.get(y, x) == T[y][x])) : 0;
+            flips.set(y, x, S.get(y, x), c);
+            S.set(y, x, c);
+        }
+
+        void apply_move(const Operation& op, Flips& flips) {
+            flips.reset();
+            const auto& [b64, y, x, c] = op;
+            assert(!S.get(y, x));
+            change(y, x, c, flips);
+            int b8 = (b64 >> (c * 8)) & 0xFF;
+            for (int d = 0; d < 8; d++) if (b8 >> d & 1) {
+                int ny = y + dy[d], nx = x + dx[d];
+                while (S.get(ny, nx) != c) {
+                    change(ny, nx, c, flips);
+                    ny += dy[d];
+                    nx += dx[d];
+                }
+            }
+        }
+
+        std::tuple<bool, int, Operation, Flips> apply_move_greedy() {
+            using namespace NInput;
+            int max_score = INT_MIN;
+            Operation best_op;
+            for (int y = 1; y <= N; y++) {
+                for (int x = 1; x <= N; x++) {
+                    auto b64 = check_placeability(y, x);
+                    if (!b64) continue;
+                    for (int c = 1; c <= C; c++) {
+                        if ((b64 >> (c * 8)) & 0xFF) {
+                            Operation op{ b64, y, x, c };
+                            int score = try_move(op);
+                            if (chmax(max_score, score)) {
+                                best_op = op;
+                            }
+                        }
+                    }
+                }
+            }
+            Flips flips;
+            if (max_score == INT_MIN) return { false, max_score, best_op, flips };
+            apply_move(best_op, flips);
+            return { true, max_score, best_op, flips };
+        }
+
+        std::vector<std::tuple<int, int, int>> run() {
+            std::vector<int> scores;
+            std::vector<Flips> flips_list;
+            while (true) {
+                auto [succeed, score, op, flips] = apply_move_greedy();
+                if (!succeed) break;
+                scores.push_back(score);
+                flips_list.push_back(flips);
+            }
+            int best_idx = (int)std::distance(scores.begin(), std::max_element(scores.begin(), scores.end()));
+
+            std::vector<std::tuple<int, int, int>> moves;
+            for (int i = 0; i <= best_idx; i++) {
+                const auto& flips = flips_list[i];
+                auto [y, x, pc, nc] = flips.flips[0].to_tuple();
+                moves.emplace_back(y, x, nc);
+            }
+            return moves;
+        }
+
+    };
+
+}
+
 struct State {
 
     static constexpr int BUFSIZE = 131072;
@@ -459,10 +625,14 @@ int main(int argc, char** argv) {
         NInput::load(std::cin);
     }
 
-    State state;
-    state.run();
+    NBeam::State state;
+    state.initialize();
+    auto moves = state.run();
 
-    auto moves = state.to_moves();
+    //State state;
+    //state.run();
+
+    //auto moves = state.to_moves();
     std::cout << moves.size() << '\n';
     for (const auto& [y, x, c] : moves) {
         std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
