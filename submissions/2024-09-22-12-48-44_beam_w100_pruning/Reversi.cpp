@@ -261,15 +261,6 @@ namespace NBeam {
         int y, x, c;
     };
 
-    inline bool is_pruned(const std::array<short, 8>& NNS) {
-        using namespace NInput;
-        // T[c] > 0 && S[c] == 0 なる c が存在したら枝刈り
-        for (int c = 1; c <= NInput::C; c++) {
-            if (NT[c] && !NNS[c]) return true;
-        }
-        return false;
-    }
-
     struct State {
 
         Board S;
@@ -380,6 +371,15 @@ namespace NBeam {
             }
         }
 
+        inline bool is_pruned(const std::array<short, 8>& NNS) const {
+            using namespace NInput;
+            // T[c] > 0 && S[c] == 0 なる c が存在したら枝刈り
+            for (int c = 1; c <= NInput::C; c++) {
+                if (NT[c] && !NNS[c]) return true;
+            }
+            return false;
+        }
+
     };
 
     struct History;
@@ -488,7 +488,7 @@ namespace NBeam {
                     best_node = nodes[i];
                 }
             }
-            dump(turn, best_score, best_node.state.NS, NInput::NT);
+            //dump(turn, best_score, best_node.state.NS, NInput::NT);
         }
 
         return best_node;
@@ -520,7 +520,7 @@ int main(int argc, char** argv) {
     // 両端が k 以外のトークン：
 
     const bool LOCAL_MODE = argc > 1 && std::string(argv[1]) == "local";
-    const int seed = 11;
+    const int seed = 5;
 
     if (LOCAL_MODE) {
         NInput::load(seed);

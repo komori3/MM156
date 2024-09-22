@@ -445,12 +445,15 @@ namespace NBeam {
 
             for (int node_index = 0; node_index < (int)nodes.size(); node_index++) {
                 const auto& state = nodes[node_index].state;
+                int prev_size = (int)temp_nodes.size();
+                std::array<short, 8> NNS{};
                 for (int y = 1; y <= N; y++) {
                     for (int x = 1; x <= N; x++) {
                         auto b64 = state.check_placeability(y, x);
                         if (!b64) continue;
                         for (int c = 1; c <= C; c++) {
                             if ((b64 >> (c << 3)) & 0xFF) {
+                                NNS[c]++;
                                 Operation op{ b64, y, x, c };
                                 int nscore = state.try_move(op);
                                 if (nscore == -1) continue; // pruned
@@ -458,6 +461,9 @@ namespace NBeam {
                             }
                         }
                     }
+                }
+                if (is_pruned(NNS)) {
+                    temp_nodes.erase(temp_nodes.begin() + prev_size, temp_nodes.end());
                 }
             }
 
@@ -488,7 +494,7 @@ namespace NBeam {
                     best_node = nodes[i];
                 }
             }
-            dump(turn, best_score, best_node.state.NS, NInput::NT);
+            //dump(turn, best_score, best_node.state.NS, NInput::NT);
         }
 
         return best_node;
@@ -520,7 +526,7 @@ int main(int argc, char** argv) {
     // 両端が k 以外のトークン：
 
     const bool LOCAL_MODE = argc > 1 && std::string(argv[1]) == "local";
-    const int seed = 11;
+    const int seed = 5;
 
     if (LOCAL_MODE) {
         NInput::load(seed);
