@@ -221,11 +221,43 @@ struct Move {
     }
 };
 
+struct Board {
+
+    static constexpr size_t SIZE = NMAX * NMAX * 3;
+
+    std::bitset<SIZE> data;
+
+    void initialize(const NNArr<int>& S) {
+        for (int y = 0; y < NMAX; y++) {
+            for (int x = 0; x < NMAX; x++) {
+                set(y, x, S[y][x]);
+            }
+        }
+    }
+
+    inline void set(int y, int x, int c) {
+        c = (c == -1) ? 7 : c;
+        int p = ((y << 5) | x) * 3;
+        data[p] = c & 1;
+        data[p + 1] = (c >> 1) & 1;
+        data[p + 2] = (c >> 2) & 1;
+    }
+
+    inline int get(int y, int x) const {
+        int p = ((y << 5) | x) * 3;
+        int c = int(data[p]) + (int(data[p + 1]) << 1) + (int(data[p + 2]) << 2);
+        return c == 7 ? -1 : c;
+    }
+
+};
+
 struct State {
 
     static constexpr int BUFSIZE = 131072;
 
-    NNArr<int> S;
+    //NNArr<int> S;
+
+    Board S;
 
     int placed;
     int matched;
@@ -238,7 +270,7 @@ struct State {
     State() { initialize(); }
 
     void initialize() {
-        S = NInput::S;
+        S.initialize(NInput::S);
         placed = 0;
         matched = compute_matched();
         pointer = 0;
@@ -254,7 +286,7 @@ struct State {
         for (int y = 1; y <= N; y++) {
             for (int x = 1; x <= N; x++) {
                 if (T[y][x] <= 0) continue;
-                m += S[y][x] == T[y][x];
+                m += S.get(y, x) == T[y][x];
             }
         }
         return m;
@@ -263,17 +295,17 @@ struct State {
     // c*8+d bit 目が立っている -> c を置くことで方向 d を裏返せる
     uint64_t can_place(int y, int x) {
         uint64_t b64 = 0;
-        if (S[y][x]) return b64;
+        if (S.get(y, x)) return b64;
         for (int d = 0; d < 8; d++) {
             int ny = y + dy[d], nx = x + dx[d];
-            if (S[ny][nx] <= 0) continue;
-            int c = S[ny][nx]; // c 以外は置ける可能性がある
+            if (S.get(ny, nx) <= 0) continue;
+            int c = S.get(ny, nx); // c 以外は置ける可能性がある
             while (true) {
                 ny += dy[d];
                 nx += dx[d];
-                if (S[ny][nx] <= 0) break;
-                if (S[ny][nx] != c) {
-                    b64 |= 1ULL << (S[ny][nx] * 8 + d); // 色 b[ny][nx] は b[y][x] に置くことができる
+                if (S.get(ny, nx) <= 0) break;
+                if (S.get(ny, nx) != c) {
+                    b64 |= 1ULL << (S.get(ny, nx) * 8 + d); // 色 b[ny][nx] は b[y][x] に置くことができる
                 }
             }
         }
@@ -282,19 +314,19 @@ struct State {
 
     void dry_change(int& p, int& m, int y, int x, int c) const {
         using namespace NInput;
-        p += int(S[y][x] == 0);
-        m += T[y][x] ? (int(c == T[y][x]) - int(S[y][x] == T[y][x])) : 0;
+        p += int(S.get(y, x) == 0);
+        m += T[y][x] ? (int(c == T[y][x]) - int(S.get(y, x) == T[y][x])) : 0;
     }
 
     int calc_diff(uint64_t b64, int y, int x, int c) const {
         using namespace NInput;
-        assert(!S[y][x]);
+        assert(!S.get(y, x));
         int nplaced = placed, nmatched = matched;
         dry_change(nplaced, nmatched, y, x, c);
         int b8 = (b64 >> (c * 8)) & 0xFF;
         for (int d = 0; d < 8; d++) if (b8 >> d & 1) {
             int ny = y + dy[d], nx = x + dx[d];
-            while (S[ny][nx] != c) {
+            while (S.get(ny, nx) != c) {
                 dry_change(nplaced, nmatched, ny, nx, c);
                 ny += dy[d];
                 nx += dx[d];
@@ -305,19 +337,19 @@ struct State {
 
     void change(int y, int x, int c) {
         using namespace NInput;
-        placed += int(S[y][x] == 0);
-        matched += T[y][x] ? (int(c == T[y][x]) - int(S[y][x] == T[y][x])) : 0;
-        move_stack[pointer++].set(y, x, S[y][x], c);
-        S[y][x] = c;
+        placed += int(S.get(y, x) == 0);
+        matched += T[y][x] ? (int(c == T[y][x]) - int(S.get(y, x) == T[y][x])) : 0;
+        move_stack[pointer++].set(y, x, S.get(y, x), c);
+        S.set(y, x, c);
     }
 
     void place(uint64_t b64, int y, int x, int c) {
-        assert(!S[y][x]);
+        assert(!S.get(y, x));
         change(y, x, c);
         int b8 = (b64 >> (c * 8)) & 0xFF;
         for (int d = 0; d < 8; d++) if (b8 >> d & 1) {
             int ny = y + dy[d], nx = x + dx[d];
-            while (S[ny][nx] != c) {
+            while (S.get(ny, nx) != c) {
                 change(ny, nx, c);
                 ny += dy[d];
                 nx += dx[d];
@@ -368,7 +400,7 @@ struct State {
         auto [y, x, pc, nc] = move_stack[pointer].to_tuple();
         placed -= int(pc == 0);
         matched -= T[y][x] ? (int(nc == T[y][x]) - int(pc == T[y][x])) : 0;
-        S[y][x] = pc;
+        S.set(y, x, pc);
         return pc == 0; // pc==0: placing / pc!=0: reversing
     }
 
