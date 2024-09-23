@@ -89,8 +89,7 @@ double GetWorkingSetSize_() {
 #endif
 
 
-namespace { // https://nyaannyaan.github.io/library/hashmap/hashset.hpp
-
+namespace {
     using namespace std;
 
     namespace HashMapImpl {
@@ -642,6 +641,8 @@ struct Board_ {
 
 struct Board {
 
+    static constexpr size_t SIZE = NMAX * NMAX * 3;
+
     NNArr<int8_t> data;
 
     void initialize(const NNArr<int>& S) {
@@ -1050,6 +1051,15 @@ int main(int argc, char** argv) {
             std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
         }
     }
+
+    
+
+    //auto moves = state.run();
+
+    //std::cout << moves.size() << '\n';
+    //for (const auto& [y, x, c] : moves) {
+    //    std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
+    //}
 
     return 0;
 }

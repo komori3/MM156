@@ -89,8 +89,7 @@ double GetWorkingSetSize_() {
 #endif
 
 
-namespace { // https://nyaannyaan.github.io/library/hashmap/hashset.hpp
-
+namespace {
     using namespace std;
 
     namespace HashMapImpl {
@@ -549,16 +548,16 @@ namespace NInput {
                 num_empty += S[y][x] == 0;
             }
         }
-        int ntarget = 0, ntoplace = 0;
+        int ntarget = 0;
         for (int y = 1; y <= N; y++) {
             for (int x = 1; x <= N; x++) {
                 in >> T[y][x];
                 if (T[y][x] >= 0) NT[T[y][x]]++;
                 ntarget += T[y][x] > 0;
-                ntoplace += T[y][x] > 0 && S[y][x] == 0;
             }
         }
-        perfect_score = ntoplace + ntarget * ntarget;
+        perfect_score = ntarget + ntarget * ntarget;
+        dump(perfect_score);
     }
 
     void load(const int seed) {
@@ -610,7 +609,7 @@ struct Flips {
     inline void reset() { sz = 0; }
 };
 
-struct Board_ {
+struct Board {
 
     static constexpr size_t SIZE = NMAX * NMAX * 3;
 
@@ -640,35 +639,10 @@ struct Board_ {
 
 };
 
-struct Board {
-
-    NNArr<int8_t> data;
-
-    void initialize(const NNArr<int>& S) {
-        for (int y = 0; y < NMAX; y++) {
-            for (int x = 0; x < NMAX; x++) {
-                set(y, x, S[y][x]);
-            }
-        }
-    }
-
-    inline void set(int y, int x, int c) {
-        data[y][x] = c;
-    }
-
-    inline int get(int y, int x) const {
-        return data[y][x];
-    }
-
-};
-
 struct Operation {
     uint64_t b64; // placeability
     int y, x, c;
 };
-
-int64_t check_placeability_count = 0;
-int64_t try_move_count = 0;
 
 struct State {
 
@@ -713,7 +687,6 @@ struct State {
 
     // c*8+d bit 目が立っている -> c を置くことで方向 d を裏返せる
     uint64_t check_placeability(int y, int x) const {
-        check_placeability_count++;
         uint64_t b64 = 0;
         if (S.get(y, x)) return b64;
         for (int d = 0; d < 8; d++) {
@@ -753,7 +726,6 @@ struct State {
 
     std::pair<double, uint64_t> try_move(const Operation& op) const {
         using namespace NInput;
-        try_move_count++;
         auto NNS(NS);
         const auto& [b64, y, x, c] = op;
         assert(!S.get(y, x));
@@ -938,7 +910,7 @@ Node chokudai_search(const State& initial_state, const int beam_width, double du
 
     std::vector<TemporaryNode> temp_nodes;
 
-    int next_dump_time = 1000, dump_interval = 1000;
+    int next_dump_time = 100, dump_interval = 100;
     while (true) {
         for (int turn = 0; turn < num_empty; turn++) {
             auto elapsed = timer.elapsed_ms();
@@ -1015,7 +987,7 @@ int main(int argc, char** argv) {
     // 両端が k 以外のトークン：
 
     const bool LOCAL_MODE = argc > 1 && std::string(argv[1]) == "local";
-    const int seed = 41;
+    const int seed = 2;
 
     if (LOCAL_MODE) {
         NInput::load(seed);
@@ -1042,14 +1014,21 @@ int main(int argc, char** argv) {
             move_history = move_history.pop();
         }
         std::reverse(moves.begin(), moves.end());
-        
-        dump(GetPeakWorkingSetSize(), check_placeability_count, try_move_count);
 
         std::cout << moves.size() << '\n';
         for (const auto& [b64, y, x, c] : moves) {
             std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
         }
     }
+
+    dump(GetPeakWorkingSetSize());
+
+    //auto moves = state.run();
+
+    //std::cout << moves.size() << '\n';
+    //for (const auto& [y, x, c] : moves) {
+    //    std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
+    //}
 
     return 0;
 }
