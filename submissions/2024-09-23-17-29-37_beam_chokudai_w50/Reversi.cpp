@@ -89,8 +89,7 @@ double GetWorkingSetSize_() {
 #endif
 
 
-namespace { // https://nyaannyaan.github.io/library/hashmap/hashset.hpp
-
+namespace {
     using namespace std;
 
     namespace HashMapImpl {
@@ -608,7 +607,6 @@ struct Operation {
 int64_t check_placeability_count = 0;
 int64_t try_move_count = 0;
 
-// https://platinum-prog.hatenablog.com/entry/2023/07/28/222536
 struct State {
 
     Board S;
@@ -789,7 +787,7 @@ struct TemporaryNode {
         : score(score_), node_index(node_index_), op(op_) {}
 };
 
-Node beam_search(const State& initial_state, const int beam_width, Timer& timer, double timelimit) {
+Node beam_search(const State& initial_state, const int beam_width) {
     using namespace NInput;
 
     std::vector<Node> nodes, next_nodes;
@@ -803,7 +801,6 @@ Node beam_search(const State& initial_state, const int beam_width, Timer& timer,
     Node best_node = nodes.back();
 
     for (int turn = 1;; turn++) {
-        if (timer.elapsed_ms() > timelimit) return best_node;
         temp_nodes.clear();
         seen.clear();
 
@@ -853,27 +850,222 @@ Node beam_search(const State& initial_state, const int beam_width, Timer& timer,
                 best_node = nodes[i];
             }
         }
+        dump(turn, best_score);
+    }
+
+    return best_node;
+}
+
+Node chokudai_search(const State& initial_state, const int beam_width, double duration) {
+    using namespace NInput;
+
+    Timer timer;
+
+    std::vector<std::set<Node>> turn_to_nodes(num_empty + 1);
+    std::vector<HashSet<uint64_t>> turn_to_hashes(num_empty + 1);
+    double best_score;
+    Node best_node;
+    {
+        Node initial_node(initial_state);
+        initial_node.move_history = Stack{ nullptr };
+        turn_to_nodes[0].insert(initial_node);
+        turn_to_hashes[0].insert(initial_node.state.hash);
+        best_score = initial_state.calc_score();
+        best_node = initial_node;
+    }
+
+    std::vector<TemporaryNode> temp_nodes;
+
+    int next_dump_time = 1000, dump_interval = 1000;
+    while (true) {
+        for (int turn = 0; turn < num_empty; turn++) {
+            auto elapsed = timer.elapsed_ms();
+            if (elapsed > next_dump_time) {
+                next_dump_time += dump_interval;
+                auto wss = GetWorkingSetSize();
+                dump(elapsed, wss, best_score);
+            }
+            if (elapsed > duration) {
+                return best_node;
+            }
+            auto& nodes = turn_to_nodes[turn];
+            auto& next_nodes = turn_to_nodes[turn + 1];
+            auto& next_hashes = turn_to_hashes[turn + 1];
+            auto thresh = next_nodes.empty() ? -1 : next_nodes.rbegin()->state.calc_score();
+            if (nodes.empty()) continue;
+            auto node = *nodes.begin();
+            nodes.erase(nodes.begin());
+            const auto& state = node.state;
+            for (int y = 1; y <= N; y++) {
+                for (int x = 1; x <= N; x++) {
+                    auto b64 = state.check_placeability(y, x);
+                    if (!b64) continue;
+                    for (int c = 1; c <= C; c++) {
+                        if ((b64 >> (c << 3)) & 0xFF) {
+                            Operation op{ b64, y, x, c };
+                            auto [nscore, nhash] = state.try_move(op);
+                            if (nscore < thresh) continue;
+                            if (next_hashes.count(nhash)) continue;
+                            auto next_node(node);
+                            next_node.advance(op);
+                            next_node.move_history = node.move_history.push(op);
+                            next_nodes.insert(next_node);
+                            next_hashes.insert(nhash);
+                            if (chmax(best_score, nscore)) {
+                                best_node = next_node;
+                            }
+                            //if (seen.count(nhash)) continue;
+                            //temp_nodes.emplace_back(nscore, node_index, op);
+                            //seen.insert(nhash);
+                        }
+                    }
+                }
+            }
+            while (next_nodes.size() > beam_width) {
+                next_nodes.erase(std::prev(next_nodes.end()));
+            }
+        }
+    }
+
+    return best_node;
+}
+
+Node beam_chokudai_search(const State& initial_state, int beam_width, double duration) {
+    using namespace NInput;
+
+    Timer timer;
+
+    std::vector<std::vector<Node>> turn_to_nodes_vec(num_empty + 1);
+    std::vector<HashSet<uint64_t>> turn_to_hashes(num_empty + 1);
+    double best_score;
+    Node best_node;
+    {
+        Node initial_node(initial_state);
+        initial_node.move_history = Stack{ nullptr };
+        turn_to_nodes_vec[0].push_back(initial_node);
+        turn_to_hashes[0].insert(initial_node.state.hash);
+        best_score = initial_state.calc_score();
+        best_node = initial_node;
+    }
+
+    std::vector<TemporaryNode> temp_nodes;
+
+    for (int turn = 0; turn < num_empty; turn++) {
+        temp_nodes.clear();
+        auto& nodes = turn_to_nodes_vec[turn];
+        auto& next_nodes = turn_to_nodes_vec[turn + 1];
+        auto& seen = turn_to_hashes[turn + 1];
+
+        for (int node_index = 0; node_index < (int)nodes.size(); node_index++) {
+            const auto& state = nodes[node_index].state;
+            for (int y = 1; y <= N; y++) {
+                for (int x = 1; x <= N; x++) {
+                    auto b64 = state.check_placeability(y, x);
+                    if (!b64) continue;
+                    for (int c = 1; c <= C; c++) {
+                        if ((b64 >> (c << 3)) & 0xFF) {
+                            Operation op{ b64, y, x, c };
+                            auto [nscore, nhash] = state.try_move(op);
+                            if (seen.count(nhash)) continue;
+                            temp_nodes.emplace_back(nscore, node_index, op);
+                            seen.insert(nhash);
+                        }
+                    }
+                }
+            }
+        }
+
+        int node_size = (int)temp_nodes.size();
+        if (node_size == 0) break;
+
+        if (node_size > beam_width) {
+            std::nth_element(temp_nodes.begin(), temp_nodes.begin() + beam_width, temp_nodes.end(),
+                [](const TemporaryNode& n1, const TemporaryNode& n2) {
+                    return n1.score > n2.score;
+                }
+            );
+        }
+
+        for (int i = 0; i < std::min(beam_width, node_size); i++) {
+            int node_index = temp_nodes[i].node_index;
+            next_nodes.emplace_back(nodes[node_index]);
+            next_nodes.back().advance(temp_nodes[i].op);
+            next_nodes.back().move_history = nodes[node_index].move_history.push(temp_nodes[i].op);
+        }
+
+        for (int i = 0; i < (int)next_nodes.size(); i++) {
+            if (chmax(best_score, next_nodes[i].state.calc_score())) {
+                best_node = next_nodes[i];
+            }
+        }
         //dump(turn, best_score);
     }
 
-    return best_node;
-}
-
-Node iterative_beam_search(const State& initial_state, const int initial_beam_width, Timer& timer, double timelimit) {
-    double best_score = -1.0;
-    Node best_node;
-    int beam_width = initial_beam_width;
-    while (timer.elapsed_ms() < timelimit) {
-        auto node = beam_search(initial_state, beam_width, timer, timelimit);
-        if (chmax(best_score, node.state.calc_score())) {
-            best_node = node;
-        }
-        dump(beam_width, GetPeakWorkingSetSize(), node.state.calc_score(), best_score);
-        beam_width *= 2;
+    std::vector<std::set<Node>> turn_to_nodes(num_empty + 1);
+    for (int turn = 0; turn <= num_empty; turn++) {
+        turn_to_nodes[turn] = std::set<Node>(turn_to_nodes_vec[turn].begin(), turn_to_nodes_vec[turn].end());
+        turn_to_nodes_vec[turn].clear();
+        turn_to_hashes[turn].clear();
     }
+
+    dump(timer.elapsed_ms(), GetWorkingSetSize(), best_score);
+
+    //beam_width *= 2;
+
+    int next_dump_time = 1000, dump_interval = 1000;
+    while (timer.elapsed_ms() > next_dump_time) next_dump_time += dump_interval;
+    while (true) {
+        for (int turn = 0; turn < num_empty; turn++) {
+            auto elapsed = timer.elapsed_ms();
+            if (elapsed > next_dump_time) {
+                next_dump_time += dump_interval;
+                auto wss = GetWorkingSetSize();
+                dump(elapsed, wss, best_score);
+            }
+            if (elapsed > duration) {
+                return best_node;
+            }
+            auto& nodes = turn_to_nodes[turn];
+            auto& next_nodes = turn_to_nodes[turn + 1];
+            auto& next_hashes = turn_to_hashes[turn + 1];
+            auto thresh = next_nodes.empty() ? -1 : next_nodes.rbegin()->state.calc_score();
+            if (nodes.empty()) continue;
+            auto node = *nodes.begin();
+            nodes.erase(nodes.begin());
+            const auto& state = node.state;
+            for (int y = 1; y <= N; y++) {
+                for (int x = 1; x <= N; x++) {
+                    auto b64 = state.check_placeability(y, x);
+                    if (!b64) continue;
+                    for (int c = 1; c <= C; c++) {
+                        if ((b64 >> (c << 3)) & 0xFF) {
+                            Operation op{ b64, y, x, c };
+                            auto [nscore, nhash] = state.try_move(op);
+                            if (nscore < thresh) continue;
+                            if (next_hashes.count(nhash)) continue;
+                            auto next_node(node);
+                            next_node.advance(op);
+                            next_node.move_history = node.move_history.push(op);
+                            next_nodes.insert(next_node);
+                            next_hashes.insert(nhash);
+                            if (chmax(best_score, nscore)) {
+                                best_node = next_node;
+                            }
+                            //if (seen.count(nhash)) continue;
+                            //temp_nodes.emplace_back(nscore, node_index, op);
+                            //seen.insert(nhash);
+                        }
+                    }
+                }
+            }
+            while (next_nodes.size() > beam_width) {
+                next_nodes.erase(std::prev(next_nodes.end()));
+            }
+        }
+    }
+
     return best_node;
 }
-
 
 int main(int argc, char** argv) {
 
@@ -883,8 +1075,22 @@ int main(int argc, char** argv) {
     cv::utils::logging::setLogLevel(cv::utils::logging::LogLevel::LOG_LEVEL_SILENT);
 #endif
 
+    // 通常オセロの四隅のように、一度置いたら二度と裏返せない"急所"が存在する
+    // 盤面がプレイアウトで生成されることから、急所に異なる色が配置されるようなケースは枝刈りしてよい
+    // 盤面の評価も、急所のみで行ったり急所の評価を重めにする等したほうがよい
+
+    // 一次元オセロで位置 x にある種類 k のトークンを裏返せるか？
+    // セルには 空白セル・壁セル・種類 k のトークン・種類 k 以外のトークン がある
+
+    // 両端の少なくとも一方が壁セル：stable
+    // 両端は壁セルではないとする
+    // x にいくつ種類 k のトークンが隣接しても一つとみなしてよいので、両端は種類 k のトークンでもないとする
+    // 両端が空白：両端に種類 k 以外のトークンを配置すれば裏返るので、unstable
+    // 一方が空白で他方がトークン k'!=k：空白に k' を配置すれば裏返るので、unstable
+    // 両端が k 以外のトークン：
+
     const bool LOCAL_MODE = argc > 1 && std::string(argv[1]) == "local";
-    const int seed = 2;
+    const int seed = 41;
 
     if (LOCAL_MODE) {
         NInput::load(seed);
@@ -895,26 +1101,39 @@ int main(int argc, char** argv) {
 
     NHash::initialize();
 
-    State state;
-    state.initialize();
+    {
+        State state;
+        state.initialize();
 
-    auto result = iterative_beam_search(state, 1, timer, 9000);
+        auto result = beam_chokudai_search(state, 50, 9000);
 
-    std::vector<Operation> moves;
-    Stack move_history = result.move_history;
-    while (move_history.head) {
-        Operation op = move_history.top();
-        moves.emplace_back(op);
-        move_history = move_history.pop();
+        //auto result = beam_search(state, 10);
+
+        std::vector<Operation> moves;
+        Stack move_history = result.move_history;
+        while (move_history.head) {
+            Operation op = move_history.top();
+            moves.emplace_back(op);
+            move_history = move_history.pop();
+        }
+        std::reverse(moves.begin(), moves.end());
+
+        dump(GetPeakWorkingSetSize(), check_placeability_count, try_move_count);
+
+        std::cout << moves.size() << '\n';
+        for (const auto& [b64, y, x, c] : moves) {
+            std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
+        }
     }
-    std::reverse(moves.begin(), moves.end());
 
-    dump(GetPeakWorkingSetSize(), check_placeability_count, try_move_count);
 
-    std::cout << moves.size() << '\n';
-    for (const auto& [b64, y, x, c] : moves) {
-        std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
-    }
+
+    //auto moves = state.run();
+
+    //std::cout << moves.size() << '\n';
+    //for (const auto& [y, x, c] : moves) {
+    //    std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
+    //}
 
     return 0;
 }

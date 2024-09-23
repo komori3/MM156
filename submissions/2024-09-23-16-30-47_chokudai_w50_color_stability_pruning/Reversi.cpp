@@ -89,7 +89,8 @@ double GetWorkingSetSize_() {
 #endif
 
 
-namespace {
+namespace { // https://nyaannyaan.github.io/library/hashmap/hashset.hpp
+
     using namespace std;
 
     namespace HashMapImpl {
@@ -558,8 +559,6 @@ namespace NInput {
             }
         }
         perfect_score = ntoplace + ntarget * ntarget;
-        std::cerr << perfect_score << '\n';
-        exit(1);
     }
 
     void load(const int seed) {
@@ -611,359 +610,742 @@ struct Flips {
     inline void reset() { sz = 0; }
 };
 
-struct Board {
 
-    static constexpr size_t SIZE = NMAX * NMAX * 3;
+namespace NBeam {
 
-    std::bitset<SIZE> data;
+#if 0
+    struct Board_ {
+        static constexpr size_t SIZE = NMAX * NMAX * 3;
 
-    void initialize(const NNArr<int>& S) {
-        for (int y = 0; y < NMAX; y++) {
-            for (int x = 0; x < NMAX; x++) {
-                set(y, x, S[y][x]);
-            }
-        }
-    }
+        std::bitset<SIZE> data;
 
-    inline void set(int y, int x, int c) {
-        c = (c == -1) ? 7 : c;
-        int p = ((y << 5) | x) * 3;
-        data[p] = c & 1;
-        data[p + 1] = (c >> 1) & 1;
-        data[p + 2] = (c >> 2) & 1;
-    }
-
-    inline int get(int y, int x) const {
-        int p = ((y << 5) | x) * 3;
-        int c = int(data[p]) + (int(data[p + 1]) << 1) + (int(data[p + 2]) << 2);
-        return c == 7 ? -1 : c;
-    }
-
-};
-
-struct Operation {
-    uint64_t b64; // placeability
-    int y, x, c;
-};
-
-struct State {
-
-    Board S;
-    std::array<short, 8> NS;
-    short placed;
-    short matched;
-    uint64_t hash;
-
-    void initialize() {
-        S.initialize(NInput::S);
-        NS.fill(0);
-        hash = 0;
-        for (int y = 1; y <= NInput::N; y++) {
-            for (int x = 1; x <= NInput::N; x++) {
-                int c = NInput::S[y][x];
-                if (c >= 0) {
-                    NS[c]++;
-                    hash ^= NHash::table[y][x][c];
+        void initialize(const NNArr<int>& S) {
+            for (int y = 0; y < NMAX; y++) {
+                for (int x = 0; x < NMAX; x++) {
+                    set(y, x, S[y][x]);
                 }
             }
         }
-        placed = 0;
-        matched = compute_matched();
-    }
-
-    inline int compute_matched() const {
-        using namespace NInput;
-        int m = 0;
-        for (int y = 1; y <= N; y++) {
-            for (int x = 1; x <= N; x++) {
-                if (T[y][x] <= 0) continue;
-                m += S.get(y, x) == T[y][x];
-            }
+        inline void set(int y, int x, int c) {
+            c = (c == -1) ? 7 : c;
+            int p = ((y << 5) | x) * 3;
+            data[p] = c & 1;
+            data[p + 1] = (c >> 1) & 1;
+            data[p + 2] = (c >> 2) & 1;
         }
-        return m;
-    }
+        inline int get(int y, int x) const {
+            int p = ((y << 5) | x) * 3;
+            int c = int(data[p]) + (int(data[p + 1]) << 1) + (int(data[p + 2]) << 2);
+            return c == 7 ? -1 : c;
+        }
+    };
+#else
+    struct Board {
 
-    inline double calc_score() const {
-        return placed + (int)matched * matched;
-    }
+        NNArr<int8_t> data;
 
-    // c*8+d bit 目が立っている -> c を置くことで方向 d を裏返せる
-    uint64_t check_placeability(int y, int x) const {
-        uint64_t b64 = 0;
-        if (S.get(y, x)) return b64;
-        for (int d = 0; d < 8; d++) {
-            int ny = y + dy[d], nx = x + dx[d];
-            int c = S.get(ny, nx);
-            if (c <= 0) continue;
-            // c 以外は置ける可能性がある
-            while (true) {
-                ny += dy[d];
-                nx += dx[d];
-                int nc = S.get(ny, nx);
-                if (nc <= 0) break;
-                if (nc != c) {
-                    b64 |= 1ULL << (nc * 8 + d); // 色 b[ny][nx] は b[y][x] に置くことができる
+        void initialize(const NNArr<int>& S) {
+            for (int y = 0; y < NMAX; y++) {
+                for (int x = 0; x < NMAX; x++) {
+                    set(y, x, S[y][x]);
                 }
             }
         }
-        return b64;
-    }
+        inline void set(int y, int x, int c) { data[y][x] = c; }
+        inline int get(int y, int x) const { return data[y][x]; }
+    };
+#endif
 
-    void try_change(std::array<short, 8>& NNS, uint64_t& h, int& p, int& m, int y, int x, int nc) const {
-        using namespace NInput;
-        int pc = S.get(y, x);
-        p += int(pc == 0);
-        m += T[y][x] ? (int(nc == T[y][x]) - int(pc == T[y][x])) : 0;
-        h ^= NHash::table[y][x][pc] ^ NHash::table[y][x][nc];
-        NNS[pc]--; NNS[nc]++;
-    }
+    struct Operation {
+        uint64_t b64; // placeability
+        int y, x, c;
+    };
 
-    inline bool is_pruned(const std::array<short, 8>& NNS) const {
-        using namespace NInput;
-        for (int c = 1; c <= C; c++) {
-            if (NT[c] && !NNS[c]) return true;
-        }
-        return false;
-    }
+    int64_t check_placeability_count = 0;
+    int64_t try_move_count = 0;
+    int64_t color_pruning_count = 0;
+    int64_t stability_pruning_count = 0;
 
-    std::pair<double, uint64_t> try_move(const Operation& op) const {
-        using namespace NInput;
-        auto NNS(NS);
-        const auto& [b64, y, x, c] = op;
-        assert(!S.get(y, x));
-        uint64_t nhash = hash;
-        int nplaced = placed, nmatched = matched;
-        try_change(NNS, nhash, nplaced, nmatched, y, x, c);
-        int b8 = (b64 >> (c * 8)) & 0xFF;
-        for (int d = 0; d < 8; d++) if (b8 >> d & 1) {
-            int ny = y + dy[d], nx = x + dx[d];
-            while (S.get(ny, nx) != c) {
-                try_change(NNS, nhash, nplaced, nmatched, ny, nx, c);
-                ny += dy[d];
-                nx += dx[d];
+    struct State {
+
+        Board S;
+        std::array<short, 8> NS;
+        short placed;
+        short matched;
+        uint64_t hash;
+
+        void initialize() {
+            S.initialize(NInput::S);
+            NS.fill(0);
+            hash = 0;
+            for (int y = 1; y <= NInput::N; y++) {
+                for (int x = 1; x <= NInput::N; x++) {
+                    int c = NInput::S[y][x];
+                    if (c >= 0) {
+                        NS[c]++;
+                        hash ^= NHash::table[y][x][c];
+                    }
+                }
             }
+            placed = 0;
+            matched = compute_matched();
         }
-        double nscore = is_pruned(NNS) ? -1e9 : nplaced + nmatched * nmatched;
-        return { nscore, nhash };
-    }
 
-    void change(int y, int x, int nc) {
-        using namespace NInput;
-        int pc = S.get(y, x);
-        placed += int(pc == 0);
-        matched += T[y][x] ? (int(nc == T[y][x]) - int(pc == T[y][x])) : 0;
-        NS[pc]--; NS[nc]++;
-        S.set(y, x, nc);
-        hash ^= NHash::table[y][x][pc] ^ NHash::table[y][x][nc];
-    }
-
-    void apply_move(const Operation& op) {
-        const auto& [b64, y, x, c] = op;
-        assert(!S.get(y, x));
-        change(y, x, c);
-        int b8 = (b64 >> (c * 8)) & 0xFF;
-        for (int d = 0; d < 8; d++) if (b8 >> d & 1) {
-            int ny = y + dy[d], nx = x + dx[d];
-            while (S.get(ny, nx) != c) {
-                change(ny, nx, c);
-                ny += dy[d];
-                nx += dx[d];
-            }
-        }
-    }
-
-};
-
-struct History;
-using HistoryPtr = std::shared_ptr<History>;
-struct History {
-    Operation op;
-    HistoryPtr parent;
-    History(const Operation& op_, HistoryPtr parent_)
-        : op(op_), parent(parent_) {}
-};
-
-struct Stack {
-
-    HistoryPtr head;
-
-    Operation top() { return head->op; }
-    Stack push(const Operation& op) {
-        return Stack({ std::make_shared<History>(op, head) });
-    }
-    Stack pop() {
-        return Stack({ head->parent });
-    }
-};
-
-struct Node {
-
-    State state;
-    Stack move_history;
-
-    Node() = default;
-    Node(const State& state_) : state(state_) {}
-    void advance(const Operation& op) {
-        state.apply_move(op);
-    }
-
-    bool operator<(const Node& rhs) const {
-        auto s1 = state.calc_score(), s2 = rhs.state.calc_score();
-        return s1 == s2 ? state.hash > rhs.state.hash : s1 > s2;
-    }
-};
-
-struct TemporaryNode {
-
-    double score;
-    int node_index;
-    Operation op;
-
-    TemporaryNode(double score_, int node_index_, const Operation& op_)
-        : score(score_), node_index(node_index_), op(op_) {}
-};
-
-Node beam_search(const State& initial_state, const int beam_width) {
-    using namespace NInput;
-
-    std::vector<Node> nodes, next_nodes;
-    nodes.emplace_back(initial_state);
-    nodes.back().move_history = Stack{ nullptr };
-
-    std::vector<TemporaryNode> temp_nodes;
-    HashSet<uint64_t> seen;
-    
-    double best_score = initial_state.calc_score();
-    Node best_node = nodes.back();
-
-    for (int turn = 1;; turn++) {
-        temp_nodes.clear();
-        seen.clear();
-
-        for (int node_index = 0; node_index < (int)nodes.size(); node_index++) {
-            const auto& state = nodes[node_index].state;
+        inline int compute_matched() const {
+            using namespace NInput;
+            int m = 0;
             for (int y = 1; y <= N; y++) {
                 for (int x = 1; x <= N; x++) {
-                    auto b64 = state.check_placeability(y, x);
-                    if (!b64) continue;
-                    for (int c = 1; c <= C; c++) {
-                        if ((b64 >> (c << 3)) & 0xFF) {
-                            Operation op{ b64, y, x, c };
-                            auto [nscore, nhash] = state.try_move(op);
-                            if (seen.count(nhash)) continue;
-                            temp_nodes.emplace_back(nscore, node_index, op);
-                            seen.insert(nhash);
+                    if (T[y][x] <= 0) continue;
+                    m += S.get(y, x) == T[y][x];
+                }
+            }
+            return m;
+        }
+
+        inline double calc_score() const {
+            return placed + (int)matched * matched;
+        }
+
+        // c*8+d bit 目が立っている -> c を置くことで方向 d を裏返せる
+        uint64_t check_placeability(int y, int x) const {
+            check_placeability_count++;
+            uint64_t b64 = 0;
+            if (S.get(y, x)) return b64;
+            for (int d = 0; d < 8; d++) {
+                int ny = y + dy[d], nx = x + dx[d];
+                int c = S.get(ny, nx);
+                if (c <= 0) continue;
+                // c 以外は置ける可能性がある
+                while (true) {
+                    ny += dy[d];
+                    nx += dx[d];
+                    int nc = S.get(ny, nx);
+                    if (nc <= 0) break;
+                    if (nc != c) {
+                        b64 |= 1ULL << (nc * 8 + d); // 色 b[ny][nx] は b[y][x] に置くことができる
+                    }
+                }
+            }
+            return b64;
+        }
+
+        void try_change(std::array<short, 8>& NNS, uint64_t& h, int& p, int& m, int y, int x, int nc) const {
+            using namespace NInput;
+            int pc = S.get(y, x);
+            p += int(pc == 0);
+            m += T[y][x] ? (int(nc == T[y][x]) - int(pc == T[y][x])) : 0;
+            h ^= NHash::table[y][x][pc] ^ NHash::table[y][x][nc];
+            NNS[pc]--; NNS[nc]++;
+        }
+
+        inline bool is_pruned(const std::array<short, 8>& NNS) const {
+            using namespace NInput;
+            for (int c = 1; c <= C; c++) {
+                if (NT[c] && !NNS[c]) return true;
+            }
+            return false;
+        }
+
+        inline bool wall(int y, int x, int d) const {
+            while (true) {
+                y += dy[d];
+                x += dx[d];
+                int c = S.get(y, x);
+                if (c == WALL) return true;
+                if (c == EMPTY) return false;
+            }
+            return false;
+        }
+
+        std::pair<double, uint64_t> try_move_(const Operation& op) const {
+            using namespace NInput;
+            try_move_count++;
+            auto NNS(NS);
+            const auto& [b64, y, x, c] = op;
+            assert(!S.get(y, x));
+            uint64_t nhash = hash;
+            int nplaced = placed, nmatched = matched;
+            try_change(NNS, nhash, nplaced, nmatched, y, x, c);
+            int b8 = (b64 >> (c * 8)) & 0xFF;
+            for (int d = 0; d < 8; d++) if (b8 >> d & 1) {
+                int ny = y + dy[d], nx = x + dx[d];
+                while (S.get(ny, nx) != c) {
+                    try_change(NNS, nhash, nplaced, nmatched, ny, nx, c);
+                    ny += dy[d];
+                    nx += dx[d];
+                }
+            }
+            if (is_pruned(NNS)) return { -1e9, nhash };
+            
+            double nscore = nplaced + nmatched * nmatched;
+            return { nscore, nhash };
+        }
+
+        void change2(Flips& fs, int y, int x, int nc) {
+            using namespace NInput;
+            int pc = S.get(y, x);
+            placed += int(pc == 0);
+            matched += T[y][x] ? (int(nc == T[y][x]) - int(pc == T[y][x])) : 0;
+            NS[pc]--; NS[nc]++;
+            S.set(y, x, nc);
+            hash ^= NHash::table[y][x][pc] ^ NHash::table[y][x][nc];
+            fs.set(y, x, pc, nc);
+        }
+
+        void undo(const Flips& fs) {
+            using namespace NInput;
+            for (int i = 0; i < (int)fs.sz; i++) {
+                const auto& f = fs.data[i];
+                auto [y, x, pc, nc] = f.to_tuple();
+                placed -= int(pc == 0);
+                matched -= T[y][x] ? (int(nc == T[y][x]) - int(pc == T[y][x])) : 0;
+                NS[pc]++; NS[nc]--;
+                S.set(y, x, pc);
+                hash ^= NHash::table[y][x][pc] ^ NHash::table[y][x][nc];
+            }
+        }
+
+        bool is_stable(int y, int x, int d0) const {
+            if (S.get(y + dy[d0], x + dx[d0]) == WALL) return true; // 即座に壁
+            int d1 = d0 + 4;
+            if (S.get(y + dy[d1], x + dx[d1]) == WALL) return true; // 即座に壁
+            return wall(y, x, d0) && wall(y, x, d1); // 全部埋まってる
+        }
+
+        bool is_stable(int y, int x) const {
+            assert(S.get(y, x) > 0);
+            for (int d = 0; d < 4; d++) {
+                if (!is_stable(y, x, d)) return false;
+            }
+            return true;
+        }
+
+        bool has_invalid_stability(int y, int x, int d) const {
+            while (true) {
+                y += dy[d];
+                x += dx[d];
+                if (S.get(y, x) == WALL) break;
+                if (is_stable(y, x) && S.get(y, x) != NInput::T[y][x]) return true;
+            }
+            return false;
+        }
+
+        bool has_invalid_stability(int y, int x) const {
+            for (int d = 0; d < 4; d++) {
+                if (!wall(y, x, d) || !wall(y, x, d + 4)) continue;
+                if (has_invalid_stability(y, x, d)) return true;
+                if (has_invalid_stability(y, x, d + 4)) return true;
+            }
+            return is_stable(y, x) && S.get(y, x) != NInput::T[y][x];
+        }
+
+        std::pair<double, uint64_t> try_move(const Operation& op) {
+            try_move_count++;
+            using namespace NInput;
+            static Flips flips;
+            const auto& [b64, y, x, c] = op;
+            assert(!S.get(y, x));
+            flips.reset();
+            change2(flips, y, x, c);
+            int b8 = (b64 >> (c * 8)) & 0xFF;
+            for (int d = 0; d < 8; d++) if (b8 >> d & 1) {
+                int ny = y + dy[d], nx = x + dx[d];
+                while (S.get(ny, nx) != c) {
+                    change2(flips, ny, nx, c);
+                    ny += dy[d];
+                    nx += dx[d];
+                }
+            }
+            auto nscore = calc_score();
+            auto nhash = hash;
+            if (is_pruned(NS)) {
+                color_pruning_count++;
+                nscore = -1e9;
+            }
+            else if (has_invalid_stability(y, x)) {
+                stability_pruning_count++;
+                nscore = -1e9;
+            }
+            undo(flips);
+            return { nscore, nhash };
+        }
+
+        void change(int y, int x, int nc) {
+            using namespace NInput;
+            int pc = S.get(y, x);
+            placed += int(pc == 0);
+            matched += T[y][x] ? (int(nc == T[y][x]) - int(pc == T[y][x])) : 0;
+            NS[pc]--; NS[nc]++;
+            S.set(y, x, nc);
+            hash ^= NHash::table[y][x][pc] ^ NHash::table[y][x][nc];
+        }
+
+        void apply_move(const Operation& op) {
+            const auto& [b64, y, x, c] = op;
+            assert(!S.get(y, x));
+            change(y, x, c);
+            int b8 = (b64 >> (c * 8)) & 0xFF;
+            for (int d = 0; d < 8; d++) if (b8 >> d & 1) {
+                int ny = y + dy[d], nx = x + dx[d];
+                while (S.get(ny, nx) != c) {
+                    change(ny, nx, c);
+                    ny += dy[d];
+                    nx += dx[d];
+                }
+            }
+        }
+
+    };
+
+    struct History;
+    using HistoryPtr = std::shared_ptr<History>;
+    struct History {
+        Operation op;
+        HistoryPtr parent;
+        History(const Operation& op_, HistoryPtr parent_)
+            : op(op_), parent(parent_) {}
+    };
+
+    struct Stack {
+
+        HistoryPtr head;
+
+        Operation top() { return head->op; }
+        Stack push(const Operation& op) {
+            return Stack({ std::make_shared<History>(op, head) });
+        }
+        Stack pop() {
+            return Stack({ head->parent });
+        }
+    };
+
+    struct Node {
+
+        State state;
+        Stack move_history;
+
+        Node() = default;
+        Node(const State& state_) : state(state_) {}
+        void advance(const Operation& op) {
+            state.apply_move(op);
+        }
+
+        bool operator<(const Node& rhs) const {
+            auto s1 = state.calc_score(), s2 = rhs.state.calc_score();
+            return s1 == s2 ? state.hash > rhs.state.hash : s1 > s2;
+        }
+    };
+
+    struct TemporaryNode {
+
+        double score;
+        int node_index;
+        Operation op;
+
+        TemporaryNode(double score_, int node_index_, const Operation& op_)
+            : score(score_), node_index(node_index_), op(op_) {}
+    };
+
+    Node beam_search(const State& initial_state, const int beam_width) {
+        using namespace NInput;
+
+        std::vector<Node> nodes, next_nodes;
+        nodes.emplace_back(initial_state);
+        nodes.back().move_history = Stack{ nullptr };
+
+        std::vector<TemporaryNode> temp_nodes;
+        HashSet<uint64_t> seen;
+
+        double best_score = initial_state.calc_score();
+        Node best_node = nodes.back();
+
+        for (int turn = 1;; turn++) {
+            temp_nodes.clear();
+            seen.clear();
+
+            for (int node_index = 0; node_index < (int)nodes.size(); node_index++) {
+                auto& state = nodes[node_index].state;
+                for (int y = 1; y <= N; y++) {
+                    for (int x = 1; x <= N; x++) {
+                        auto b64 = state.check_placeability(y, x);
+                        if (!b64) continue;
+                        for (int c = 1; c <= C; c++) {
+                            if ((b64 >> (c << 3)) & 0xFF) {
+                                Operation op{ b64, y, x, c };
+                                auto [nscore, nhash] = state.try_move(op);
+                                if (seen.count(nhash)) continue;
+                                temp_nodes.emplace_back(nscore, node_index, op);
+                                seen.insert(nhash);
+                            }
                         }
                     }
                 }
             }
-        }
 
-        int node_size = (int)temp_nodes.size();
+            int node_size = (int)temp_nodes.size();
 
-        if (node_size == 0) break;
+            if (node_size == 0) break;
 
-        if (node_size > beam_width) {
-            std::nth_element(temp_nodes.begin(), temp_nodes.begin() + beam_width, temp_nodes.end(),
-                [](const TemporaryNode& n1, const TemporaryNode& n2) {
-                    return n1.score > n2.score;
-                }
-            );
-        }
-
-        for (int i = 0; i < std::min(beam_width, node_size); i++) {
-            int node_index = temp_nodes[i].node_index;
-            next_nodes.emplace_back(nodes[node_index]);
-            next_nodes.back().advance(temp_nodes[i].op);
-            next_nodes.back().move_history = nodes[node_index].move_history.push(temp_nodes[i].op);
-        }
-
-        std::swap(nodes, next_nodes);
-        next_nodes.clear();
-
-        for (int i = 0; i < (int)nodes.size(); i++) {
-            if (chmax(best_score, nodes[i].state.calc_score())) {
-                best_node = nodes[i];
+            if (node_size > beam_width) {
+                std::nth_element(temp_nodes.begin(), temp_nodes.begin() + beam_width, temp_nodes.end(),
+                    [](const TemporaryNode& n1, const TemporaryNode& n2) {
+                        return n1.score > n2.score;
+                    }
+                );
             }
+
+            for (int i = 0; i < std::min(beam_width, node_size); i++) {
+                int node_index = temp_nodes[i].node_index;
+                next_nodes.emplace_back(nodes[node_index]);
+                next_nodes.back().advance(temp_nodes[i].op);
+                next_nodes.back().move_history = nodes[node_index].move_history.push(temp_nodes[i].op);
+            }
+
+            std::swap(nodes, next_nodes);
+            next_nodes.clear();
+
+            for (int i = 0; i < (int)nodes.size(); i++) {
+                if (chmax(best_score, nodes[i].state.calc_score())) {
+                    best_node = nodes[i];
+                }
+            }
+            dump(turn, best_score);
         }
-        dump(turn, best_score);
+
+        return best_node;
     }
 
-    return best_node;
+    Node chokudai_search(const State& initial_state, const int beam_width, double duration) {
+        using namespace NInput;
+
+        Timer timer;
+
+        std::vector<std::set<Node>> turn_to_nodes(num_empty + 1);
+        std::vector<HashSet<uint64_t>> turn_to_hashes(num_empty + 1);
+        double best_score;
+        Node best_node;
+        {
+            Node initial_node(initial_state);
+            initial_node.move_history = Stack{ nullptr };
+            turn_to_nodes[0].insert(initial_node);
+            turn_to_hashes[0].insert(initial_node.state.hash);
+            best_score = initial_state.calc_score();
+            best_node = initial_node;
+        }
+
+        std::vector<TemporaryNode> temp_nodes;
+
+        int next_dump_time = 1000, dump_interval = 1000;
+        while (true) {
+            for (int turn = 0; turn < num_empty; turn++) {
+                auto elapsed = timer.elapsed_ms();
+                if (elapsed > next_dump_time) {
+                    next_dump_time += dump_interval;
+                    auto wss = GetPeakWorkingSetSize();
+                    dump(elapsed, wss, best_score, check_placeability_count, try_move_count, color_pruning_count, stability_pruning_count);
+                }
+                if (elapsed > duration) {
+                    return best_node;
+                }
+                auto& nodes = turn_to_nodes[turn];
+                auto& next_nodes = turn_to_nodes[turn + 1];
+                auto& next_hashes = turn_to_hashes[turn + 1];
+                auto thresh = next_nodes.empty() ? -1 : next_nodes.rbegin()->state.calc_score();
+                if (nodes.empty()) continue;
+                auto node = *nodes.begin();
+                nodes.erase(nodes.begin());
+                auto& state = node.state;
+                for (int y = 1; y <= N; y++) {
+                    for (int x = 1; x <= N; x++) {
+                        auto b64 = state.check_placeability(y, x);
+                        if (!b64) continue;
+                        for (int c = 1; c <= C; c++) {
+                            if ((b64 >> (c << 3)) & 0xFF) {
+                                Operation op{ b64, y, x, c };
+                                auto [nscore, nhash] = state.try_move(op);
+                                if (nscore < thresh) continue;
+                                if (next_hashes.count(nhash)) continue;
+                                auto next_node(node);
+                                next_node.advance(op);
+                                next_node.move_history = node.move_history.push(op);
+                                next_nodes.insert(next_node);
+                                next_hashes.insert(nhash);
+                                if (chmax(best_score, nscore)) {
+                                    best_node = next_node;
+                                }
+                                //if (seen.count(nhash)) continue;
+                                //temp_nodes.emplace_back(nscore, node_index, op);
+                                //seen.insert(nhash);
+                            }
+                        }
+                    }
+                }
+                while (next_nodes.size() > beam_width) {
+                    next_nodes.erase(std::prev(next_nodes.end()));
+                }
+            }
+        }
+
+        return best_node;
+    }
+
 }
 
-Node chokudai_search(const State& initial_state, const int beam_width, double duration) {
-    using namespace NInput;
+namespace NDFS {
 
-    Timer timer;
+    struct Operation {
+        uint64_t b64; // placeability
+        int y, x, c;
+    };
 
-    std::vector<std::set<Node>> turn_to_nodes(num_empty + 1);
-    std::vector<HashSet<uint64_t>> turn_to_hashes(num_empty + 1);
-    double best_score;
-    Node best_node;
-    {
-        Node initial_node(initial_state);
-        initial_node.move_history = Stack{ nullptr };
-        turn_to_nodes[0].insert(initial_node);
-        turn_to_hashes[0].insert(initial_node.state.hash);
-        best_score = initial_state.calc_score();
-        best_node = initial_node;
-    }
+    struct State {
 
-    std::vector<TemporaryNode> temp_nodes;
+        NNArr<int8_t> S;
+        NNArr<uint64_t> placeability;
+        NNArr<bool> stability;
+        std::array<short, 8> NS;
+        short placed;
+        short matched;
+        uint64_t hash;
 
-    int next_dump_time = 1000, dump_interval = 1000;
-    while (true) {
-        for (int turn = 0; turn < num_empty; turn++) {
-            auto elapsed = timer.elapsed_ms();
-            if (elapsed > next_dump_time) {
-                next_dump_time += dump_interval;
-                auto wss = GetPeakWorkingSetSize();
-                dump(elapsed, wss, best_score);
+        void initialize() {
+            for (int y = 0; y < NMAX; y++) {
+                for (int x = 0; x < NMAX; x++) {
+                    S[y][x] = NInput::S[y][x];
+                }
             }
-            if (elapsed > duration) {
-                return best_node;
+            placeability = compute_placeability();
+            stability = compute_stability();
+            NS.fill(0);
+            for (int y = 1; y <= NInput::N; y++) {
+                for (int x = 1; x <= NInput::N; x++) {
+                    int c = NInput::S[y][x];
+                    if (c >= 0) NS[c]++;
+                }
             }
-            auto& nodes = turn_to_nodes[turn];
-            auto& next_nodes = turn_to_nodes[turn + 1];
-            auto& next_hashes = turn_to_hashes[turn + 1];
-            auto thresh = next_nodes.empty() ? -1 : next_nodes.rbegin()->state.calc_score();
-            if (nodes.empty()) continue;
-            auto node = *nodes.begin();
-            nodes.erase(nodes.begin());
-            const auto& state = node.state;
-            for (int y = 1; y <= N; y++) {
-                for (int x = 1; x <= N; x++) {
-                    auto b64 = state.check_placeability(y, x);
-                    if (!b64) continue;
-                    for (int c = 1; c <= C; c++) {
-                        if ((b64 >> (c << 3)) & 0xFF) {
-                            Operation op{ b64, y, x, c };
-                            auto [nscore, nhash] = state.try_move(op);
-                            if (nscore < thresh) continue;
-                            if (next_hashes.count(nhash)) continue;
-                            auto next_node(node);
-                            next_node.advance(op);
-                            next_node.move_history = node.move_history.push(op);
-                            next_nodes.insert(next_node);
-                            next_hashes.insert(nhash);
-                            if (chmax(best_score, nscore)) {
-                                best_node = next_node;
-                            }
-                            //if (seen.count(nhash)) continue;
-                            //temp_nodes.emplace_back(nscore, node_index, op);
-                            //seen.insert(nhash);
-                        }
+            placed = compute_placed();
+            matched = compute_matched();
+            hash = compute_hash();
+        }
+
+        inline NNArr<uint64_t> compute_placeability() const {
+            NNArr<uint64_t> placeability{};
+            for (int y = 1; y <= NInput::N; y++) {
+                for (int x = 1; x <= NInput::N; x++) {
+                    placeability[y][x] = check_placeability(y, x);
+                }
+            }
+            return placeability;
+        }
+
+        inline NNArr<bool> compute_stability() const {
+            NNArr<bool> stability{};
+            for (int y = 1; y <= NInput::N; y++) {
+                for (int x = 1; x <= NInput::N; x++) {
+                    if (S[y][x] > 0) {
+                        stability[y][x] = is_stable(y, x);
                     }
                 }
             }
-            while (next_nodes.size() > beam_width) {
-                next_nodes.erase(std::prev(next_nodes.end()));
+            return stability;
+        }
+
+        inline int compute_placed() const {
+            int m = 0;
+            const int N = NInput::N;
+            for (int y = 1; y <= N; y++) {
+                for (int x = 1; x <= N; x++) {
+                    m += !NInput::S[y][x] && S[y][x];
+                }
             }
+            return m;
+        }
+
+        inline int compute_matched() const {
+            using namespace NInput;
+            int m = 0;
+            for (int y = 1; y <= N; y++) {
+                for (int x = 1; x <= N; x++) {
+                    if (T[y][x] <= 0) continue;
+                    m += S[y][x] == T[y][x];
+                }
+            }
+            return m;
+        }
+
+        inline uint64_t compute_hash() const {
+            uint64_t h = 0;
+            for (int y = 1; y <= NInput::N; y++) {
+                for (int x = 1; x <= NInput::N; x++) {
+                    int c = S[y][x];
+                    if (c >= 0) {
+                        h ^= NHash::table[y][x][c];
+                    }
+                }
+            }
+            return h;
+        }
+
+        inline double calc_score() const {
+            return placed + (int)matched * matched;
+        }
+
+        inline double eval() const {
+            using namespace NInput;
+            return matched;
+        }
+
+        // c*8+d bit 目が立っている -> c を置くことで方向 d を裏返せる
+        uint64_t check_placeability(int y, int x) const {
+            uint64_t b64 = 0;
+            if (S[y][x]) return b64;
+            for (int d = 0; d < 8; d++) {
+                int ny = y + dy[d], nx = x + dx[d];
+                int c = S[ny][nx];
+                if (c <= 0) continue;
+                // c 以外は置ける可能性がある
+                while (true) {
+                    ny += dy[d];
+                    nx += dx[d];
+                    int nc = S[ny][nx];
+                    if (nc <= 0) break;
+                    if (nc != c) {
+                        b64 |= 1ULL << (nc * 8 + d); // 色 b[ny][nx] は b[y][x] に置くことができる
+                    }
+                }
+            }
+            return b64;
+        }
+
+        inline int detect(int y, int x, int d) const {
+            int c = S[y][x], nc;
+            while (true) {
+                y += dy[d];
+                x += dx[d];
+                nc = S[y][x];
+                if (nc != c) break;
+            }
+            return nc;
+        }
+
+        inline bool wall(int y, int x, int d) const {
+            while (true) {
+                y += dy[d];
+                x += dx[d];
+                int c = S[y][x];
+                if (c == WALL) return true;
+                if (c == EMPTY) return false;
+            }
+            return false;
+        }
+
+        bool is_stable(int y, int x, int d0) const {
+            if (S[y + dy[d0]][x + dx[d0]] == WALL) return true; // 即座に壁
+            int d1 = d0 + 4;
+            if (S[y + dy[d1]][x + dx[d1]] == WALL) return true; // 即座に壁
+            return wall(y, x, d0) && wall(y, x, d1); // 全部埋まってる
+        }
+
+        bool is_stable(int y, int x) const {
+            assert(S[y][x] > 0);
+            for (int d = 0; d < 4; d++) {
+                if (!is_stable(y, x, d)) return false;
+            }
+            return true;
+        }
+
+        int count_stable() const {
+            using namespace NInput;
+            int n = 0;
+            for (int y = 1; y <= N; y++) {
+                for (int x = 1; x <= N; x++) {
+                    if (S[y][x] > 0) n += stability[y][x];
+                }
+            }
+            return n;
+        }
+
+        inline bool is_pruned(const Flips& fs) const {
+            using namespace NInput;
+            for (int c = 1; c <= C; c++) {
+                if (NT[c] && !NS[c]) return true;
+            }
+            for (int i = 0; i < (int)fs.sz; i++) {
+                auto [y, x, pc, nc] = fs.data[i].to_tuple();
+                if (S[y][x] != NInput::T[y][x] && stability[y][x]) return true;
+            }
+            return false;
+        }
+
+        void change(int y, int x, int nc, Flips& fs) {
+            using namespace NInput;
+            int pc = S[y][x];
+            placed += int(pc == 0);
+            matched += T[y][x] ? (int(nc == T[y][x]) - int(pc == T[y][x])) : 0;
+            NS[pc]--; NS[nc]++;
+            S[y][x] = nc;
+            hash ^= NHash::table[y][x][pc] ^ NHash::table[y][x][nc];
+            fs.set(y, x, pc, nc);
+        }
+
+        void apply_move(const Operation& op, Flips& fs) {
+            const auto& [b64, y, x, c] = op;
+            assert(!S[y][x]);
+            change(y, x, c, fs);
+            int b8 = (b64 >> (c * 8)) & 0xFF;
+            for (int d = 0; d < 8; d++) if (b8 >> d & 1) {
+                int ny = y + dy[d], nx = x + dx[d];
+                while (S[ny][nx] != c) {
+                    change(ny, nx, c, fs);
+                    ny += dy[d];
+                    nx += dx[d];
+                }
+            }
+            //assert(placed == compute_placed());
+            //assert(matched == compute_matched());
+            //assert(hash == compute_hash());
+            placeability = compute_placeability();
+            stability = compute_stability();
+        }
+
+    };
+
+    void dfs(State s, double& best_score, HashSet<uint64_t>& seen, int depth) {
+        using namespace NInput;
+        //dump(depth, s.count_stable());
+        std::vector<std::pair<double, Operation>> cands;
+        for (int y = 1; y <= N; y++) {
+            for (int x = 1; x <= N; x++) {
+                auto b64 = s.placeability[y][x];
+                if (!b64) continue;
+                for (int c = 1; c <= C; c++) {
+                    if (!((b64 >> (c << 3)) & 0xFF)) continue;
+                    Operation op{ b64, y, x, c };
+                    State ns(s);
+                    Flips fs;
+                    ns.apply_move(op, fs);
+                    if (!seen.count(ns.hash) && !ns.is_pruned(fs)) {
+                        seen.insert(ns.hash);
+                        cands.emplace_back(ns.eval(), op);
+                    }
+                }
+            }
+        }
+        std::sort(cands.begin(), cands.end(), [](const auto& a, const auto& b) {
+            return a.first > b.first;
+            });
+        for (const auto& [score, op] : cands) {
+            State ns(s);
+            Flips fs;
+            ns.apply_move(op, fs);
+            if (chmax(best_score, ns.calc_score())) {
+                dump(depth, seen.size(), ns.count_stable(), best_score);
+            }
+            dfs(ns, best_score, seen, depth + 1);
         }
     }
 
-    return best_node;
 }
 
 int main(int argc, char** argv) {
@@ -1000,13 +1382,27 @@ int main(int argc, char** argv) {
 
     NHash::initialize();
 
-    {
+    if (false) {
+        using namespace NDFS;
+        State state;
+        state.initialize();
+
+        double best_score = -1.0;
+        HashSet<uint64_t> seen;
+        seen.insert(state.hash);
+        dfs(state, best_score, seen, 0);
+        dump(seen.size());
+        exit(1);
+    }
+
+    if (true) {
+        using namespace NBeam;
         State state;
         state.initialize();
 
         auto result = chokudai_search(state, 50, 9000);
 
-        //auto result = beam_search(state, 10);
+        //auto result = beam_search(state, 1000);
 
         std::vector<Operation> moves;
         Stack move_history = result.move_history;
@@ -1016,21 +1412,14 @@ int main(int argc, char** argv) {
             move_history = move_history.pop();
         }
         std::reverse(moves.begin(), moves.end());
+        
+        dump(GetPeakWorkingSetSize(), check_placeability_count, try_move_count);
 
         std::cout << moves.size() << '\n';
         for (const auto& [b64, y, x, c] : moves) {
             std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
         }
     }
-
-    dump(GetPeakWorkingSetSize());
-
-    //auto moves = state.run();
-
-    //std::cout << moves.size() << '\n';
-    //for (const auto& [y, x, c] : moves) {
-    //    std::cout << y - 1 << ' ' << x - 1 << ' ' << c << '\n';
-    //}
 
     return 0;
 }
